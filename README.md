@@ -1,2 +1,2 @@
 # py-flask-signup-docker
-Sample Python application to show the capabilities of EC2 Container Service.
+This Python sample application is based on the [eb-py-flask-signup](https://github.com/awslabs/eb-py-flask-signup) sample. It has been modified to run on Amazon EC2 Container Service (ECS).
