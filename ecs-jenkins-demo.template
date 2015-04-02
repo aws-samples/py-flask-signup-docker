@@ -1,0 +1,535 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+
+  "Description": "AWS CloudFormation Sample Template Create a load balanced Jenkins CI server with Docker installed. The application is using CloudWatch logs **WARNING** This template creates an Amazon EC2 instance in an Autoscaling group. You will be billed for the AWS resources used if you create a stack from this template.",
+
+  "Parameters": {
+    "InstanceType": {
+      "Description": "WebServer EC2 instance type",
+      "Type": "String",
+      "Default": "t2.medium",
+      "AllowedValues": ["t1.micro", "t2.micro", "t2.small", "t2.medium", "m3.medium", "m3.large", "m3.xlarge", "m3.2xlarge", "c3.large", "c3.xlarge", "c3.2xlarge", "c3.4xlarge", "c3.8xlarge", "c4.large", "c4.xlarge", "c4.2xlarge", "c4.4xlarge", "c4.8xlarge", "r3.large", "r3.xlarge", "r3.2xlarge", "r3.4xlarge", "r3.8xlarge", "i2.xlarge", "i2.2xlarge", "i2.4xlarge", "i2.8xlarge", "hi1.4xlarge", "hs1.8xlarge", "cr1.8xlarge", "cc2.8xlarge"],
+      "ConstraintDescription": "must be a valid EC2 instance type."
+    },
+
+    "KeyName": {
+      "Description": "The EC2 Key Pair to allow SSH access to the instances",
+      "Type": "AWS::EC2::KeyPair::KeyName",
+      "ConstraintDescription": "must be the name of an existing EC2 KeyPair."
+    },
+
+    "VpcId": {
+      "Description": "The VPC Id to create the Security Group in.",
+      "Type": "AWS::EC2::VPC::Id",
+      "ConstraintDescription": "must be the name of an existing VPC."
+    },
+
+    "SSHLocation": {
+      "Description": "The IP address range that can be used to SSH to the EC2 instances",
+      "Type": "String",
+      "MinLength": "9",
+      "MaxLength": "18",
+      "Default": "0.0.0.0/0",
+      "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+      "ConstraintDescription": "must be a valid IP CIDR range of the form x.x.x.x/x."
+    },
+
+    "PublicSubnets": {
+      "Description": "List of Subnets to deploy the ELB and Instances into",
+      "Type": "List<AWS::EC2::Subnet::Id>",
+      "ConstraintDescription": "Must be a valid list of VPC Subnets."
+    },
+
+    "AutoscalingGroupAZs": {
+      "Description": "List of availability zones for the Autoscaling group",
+      "Type": "CommaDelimitedList",
+      "ConstraintDescription": "Must be a valid list of Availabilty Zones that match the AZs of the PublicSubnets list."
+    }
+
+  },
+
+  "Mappings": {
+    "AWSInstanceType2Arch": {
+      "t1.micro"    : { "Arch": "PV64" },
+      "t2.micro"    : { "Arch": "HVM64" },
+      "t2.small"    : { "Arch": "HVM64" },
+      "t2.medium"   : { "Arch": "HVM64" },
+      "m3.medium"   : { "Arch": "HVM64" },
+      "m3.large"    : { "Arch": "HVM64" },
+      "m3.xlarge"   : { "Arch": "HVM64" },
+      "m3.2xlarge"  : { "Arch": "HVM64" },
+      "c3.large"    : { "Arch": "HVM64" },
+      "c3.xlarge"   : { "Arch": "HVM64" },
+      "c3.2xlarge"  : { "Arch": "HVM64" },
+      "c3.4xlarge"  : { "Arch": "HVM64" },
+      "c3.8xlarge"  : { "Arch": "HVM64" },
+      "c4.large"    : { "Arch": "HVM64" },
+      "c4.xlarge"   : { "Arch": "HVM64" },
+      "c4.2xlarge"  : { "Arch": "HVM64" },
+      "c4.4xlarge"  : { "Arch": "HVM64" },
+      "c4.8xlarge"  : { "Arch": "HVM64" },
+      "r3.large"    : { "Arch": "HVM64" },
+      "r3.xlarge"   : { "Arch": "HVM64" },
+      "r3.2xlarge"  : { "Arch": "HVM64" },
+      "r3.4xlarge"  : { "Arch": "HVM64" },
+      "r3.8xlarge"  : { "Arch": "HVM64" },
+      "i2.xlarge"   : { "Arch": "HVM64" },
+      "i2.2xlarge"  : { "Arch": "HVM64" },
+      "i2.4xlarge"  : { "Arch": "HVM64" },
+      "i2.8xlarge"  : { "Arch": "HVM64" },
+      "hi1.4xlarge" : { "Arch": "HVM64" },
+      "hs1.8xlarge" : { "Arch": "HVM64" },
+      "cr1.8xlarge" : { "Arch": "HVM64" },
+      "cc2.8xlarge" : { "Arch": "HVM64" }
+    },
+    "AWSRegionArch2AMI": {
+      "us-east-1"       : { "PV64": "ami-1ccae774", "HVM64": "ami-1ecae776" },
+      "us-west-2"       : { "PV64": "ami-ff527ecf", "HVM64": "ami-e7527ed7" },
+      "us-west-1"       : { "PV64": "ami-d514f291", "HVM64": "ami-d114f295" },
+      "eu-west-1"       : { "PV64": "ami-bf0897c8", "HVM64": "ami-a10897d6" },
+      "eu-central-1"    : { "PV64": "ami-ac221fb1", "HVM64": "ami-a8221fb5" },
+      "ap-northeast-1"  : { "PV64": "ami-acd9e8fe", "HVM64": "ami-68d8e93a" },
+      "ap-southeast-1"  : { "PV64": "ami-27f90e27", "HVM64": "ami-cbf90ecb" },
+      "ap-southeast-2"  : { "PV64": "ami-ff9cecc5", "HVM64": "ami-fd9cecc7" },
+      "sa-east-1"       : { "PV64": "ami-fd9925e0", "HVM64": "ami-b52890a8" }
+    }
+  },
+
+  "Resources": {
+
+    "CloudFormationLogs": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "RetentionInDays": 7
+      }
+    },
+
+    "JenkinsRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Effect": "Allow",
+            "Principal": {
+              "Service": [ "ec2.amazonaws.com" ]
+            },
+            "Action": ["sts:AssumeRole"]
+          }]
+        },
+        "Path": "/",
+        "Policies": [{
+          "PolicyName": "JenkinsRolePolicy",
+          "PolicyDocument": {
+            "Version": "2012-10-17",
+            "Statement": [{
+              "Effect": "Allow",
+              "Action": ["logs:*"],
+              "Resource": [
+                "arn:aws:logs:*:*:*"
+              ]
+            }, {
+              "Effect": "Allow",
+              "Action": "ecs:*",
+              "Resource": "*"
+            }]
+          }
+        }]
+      }
+    },
+
+    "JenkinsInstanceProfile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {
+        "Path": "/",
+        "Roles": [{
+          "Ref": "JenkinsRole"
+        }]
+      }
+    },
+
+    "WebServerGroup": {
+      "Type": "AWS::AutoScaling::AutoScalingGroup",
+      "Properties": {
+        "AvailabilityZones": {
+          "Ref": "AutoscalingGroupAZs"
+        },
+        "VPCZoneIdentifier": {
+          "Ref": "PublicSubnets"
+        },
+        "LaunchConfigurationName": {
+          "Ref": "LaunchConfig"
+        },
+        "MinSize": "1",
+        "MaxSize": "1"
+      }
+    },
+
+    "LaunchConfig": {
+      "Type": "AWS::AutoScaling::LaunchConfiguration",
+      "Metadata": {
+        "Comment": "Install a simple application",
+        "AWS::CloudFormation::Init": {
+          "configSets": {
+            "install_all": ["install_cfn", "install_base", "install_nginx", "install_logs"]
+          },
+
+          "install_cfn": {
+            "files": {
+              "/etc/cfn/cfn-hup.conf": {
+                "content": {
+                  "Fn::Join": ["", [
+                    "[main]\n",
+                    "stack=", {
+                      "Ref": "AWS::StackId"
+                    }, "\n",
+                    "region=", {
+                      "Ref": "AWS::Region"
+                    }, "\n"
+                  ]]
+                },
+                "mode": "000400",
+                "owner": "root",
+                "group": "root"
+              },
+
+              "/etc/cfn/hooks.d/cfn-auto-reloader.conf": {
+                "content": {
+                  "Fn::Join": ["", [
+                    "[cfn-auto-reloader-hook]\n",
+                    "triggers=post.update\n",
+                    "path=Resources.WebServerInstance.Metadata.AWS::CloudFormation::Init\n",
+                    "action=/opt/aws/bin/cfn-init -v ",
+                    "         --stack ", {
+                      "Ref": "AWS::StackName"
+                    },
+                    "         --resource WebServerInstance ",
+                    "         --configsets install_all ",
+                    "         --region ", {
+                      "Ref": "AWS::Region"
+                    }, "\n",
+                    "runas=root\n"
+                  ]]
+                }
+              }
+            },
+
+            "services": {
+              "sysvinit": {
+                "cfn-hup": {
+                  "enabled": "true",
+                  "ensureRunning": "true",
+                  "files": ["/etc/cfn/cfn-hup.conf", "/etc/cfn/hooks.d/cfn-auto-reloader.conf"]
+                }
+              }
+            }
+          },
+
+          "install_base": {
+            "packages": {
+              "yum": {
+                "git": [],
+                "docker": [],
+                "httpd-tools": []
+              }
+            },
+            "services": {
+              "sysvinit": {
+                "docker": {
+                  "enabled": "true",
+                  "ensureRunning": "true"
+                }
+              }
+            }
+          },
+
+          "install_nginx": {
+            "packages": {
+              "yum": {
+                "nginx": []
+              }
+            },
+
+            "files": {
+              "/etc/nginx/nginx.conf": {
+                "content": {
+                  "Fn::Join": ["", [
+                    "user  nginx;\n",
+                    "worker_processes  1;\n\n",
+                    "error_log  /var/log/nginx/error.log;\n",
+                    "pid        /var/run/nginx.pid;\n\n",
+                    "events {\n",
+                    "    worker_connections  1024;\n",
+                    "}\n\n",
+                    "http {\n",
+                    "    include       /etc/nginx/mime.types;\n",
+                    "    default_type  application/octet-stream;\n",
+                    "    log_format  main  '$remote_addr - $remote_user [$time_local] \"$request\" '\n",
+                    "                      '$status $body_bytes_sent \"$http_referer\" '\n",
+                    "                      '\"$http_user_agent\" \"$http_x_forwarded_for\"';\n\n",
+                    "    access_log  /var/log/nginx/access.log  main;\n",
+                    "    sendfile        on;\n",
+                    "    keepalive_timeout  65;\n",
+                    "    include /etc/nginx/conf.d/*.conf;\n",
+                    "    index   index.html index.htm;\n",
+                    "    server {\n",
+                    "        listen       80;\n",
+                    "        server_name  _;\n",
+                    "        location / {\n",
+                    "          proxy_pass              http://127.0.0.1:8080;\n",
+                    "          proxy_set_header        Host $host;\n",
+                    "          proxy_set_header        X-Real-IP $remote_addr;\n",
+                    "          proxy_set_header        X-Forwarded-For $proxy_add_x_forwarded_for;\n",
+                    "          proxy_connect_timeout   150;\n",
+                    "          proxy_send_timeout      100;\n",
+                    "          proxy_read_timeout      100;\n",
+                    "          proxy_buffers           4 32k;\n",
+                    "          client_max_body_size    8m;\n",
+                    "          client_body_buffer_size 128k;\n",
+                    "        }\n",
+                    "   }\n",
+                    "}\n"
+                  ]]
+                },
+                "mode": "000444",
+                "owner": "root",
+                "group": "root"
+              }
+            },
+            "services": {
+              "sysvinit": {
+                "nginx": {
+                  "enabled": "true",
+                  "ensureRunning": "true",
+                  "files": ["/etc/nginx/nginx.conf"]
+                }
+              }
+            }
+          },
+
+          "install_logs": {
+            "packages": {
+              "yum": {
+                "awslogs": []
+              }
+            },
+
+            "files": {
+              "/etc/awslogs/awslogs.conf": {
+                "content": {
+                  "Fn::Join": ["", [
+                    "[general]\n",
+                    "state_file= /var/awslogs/state/agent-state\n",
+
+                    "[/var/log/cloud-init.log]\n",
+                    "file = /var/log/cloud-init.log\n",
+                    "log_group_name = ", {
+                      "Ref": "CloudFormationLogs"
+                    }, "\n",
+                    "log_stream_name = {instance_id}/cloud-init.log\n",
+                    "datetime_format = \n",
+
+                    "[/var/log/cloud-init-output.log]\n",
+                    "file = /var/log/cloud-init-output.log\n",
+                    "log_group_name = ", {
+                      "Ref": "CloudFormationLogs"
+                    }, "\n",
+                    "log_stream_name = {instance_id}/cloud-init-output.log\n",
+                    "datetime_format = \n",
+
+                    "[/var/log/cfn-init.log]\n",
+                    "file = /var/log/cfn-init.log\n",
+                    "log_group_name = ", {
+                      "Ref": "CloudFormationLogs"
+                    }, "\n",
+                    "log_stream_name = {instance_id}/cfn-init.log\n",
+                    "datetime_format = \n",
+
+                    "[/var/log/cfn-hup.log]\n",
+                    "file = /var/log/cfn-hup.log\n",
+                    "log_group_name = ", {
+                      "Ref": "CloudFormationLogs"
+                    }, "\n",
+                    "log_stream_name = {instance_id}/cfn-hup.log\n",
+                    "datetime_format = \n",
+
+                    "[/var/log/cfn-wire.log]\n",
+                    "file = /var/log/cfn-wire.log\n",
+                    "log_group_name = ", {
+                      "Ref": "CloudFormationLogs"
+                    }, "\n",
+                    "log_stream_name = {instance_id}/cfn-wire.log\n",
+                    "datetime_format = \n",
+
+                    "[/var/log/nginx/access.log]\n",
+                    "file = /var/log/nginx/access.log\n",
+                    "log_group_name = ", {
+                      "Ref": "CloudFormationLogs"
+                    }, "\n",
+                    "log_stream_name = {instance_id}/nginx-access.log\n",
+                    "datetime_format = \n",
+
+                    "[/var/log/nginx/error.log]\n",
+                    "file = /var/log/nginx/error.log\n",
+                    "log_group_name = ", {
+                      "Ref": "CloudFormationLogs"
+                    }, "\n",
+                    "log_stream_name = {instance_id}/nginx-error.log\n",
+                    "datetime_format = \n",
+
+                    "[/var/log/jenkins/jenkins.log]\n",
+                    "file = /var/log/jenkins/jenkins.log\n",
+                    "log_group_name = ", {
+                      "Ref": "CloudFormationLogs"
+                    }, "\n",
+                    "log_stream_name = {instance_id}/jenkins.log\n",
+                    "datetime_format = \n"
+
+                  ]]
+                },
+                "mode": "000444",
+                "owner": "root",
+                "group": "root"
+              }
+            },
+            "commands": {
+              "01_create_state_directory": {
+                "command": "mkdir -p /var/awslogs/state"
+              },
+              "02_change_log_region": {
+                "command": {
+                  "Fn::Join": ["", ["sed -i 's/region = us-east-1/region = ",
+                    { "Ref": "AWS::Region" },
+                    "/g' /etc/awslogs/awscli.conf"]]
+                }
+              }
+            },
+            "services": {
+              "sysvinit": {
+                "awslogs": {
+                  "enabled": "true",
+                  "ensureRunning": "true",
+                  "files": ["/etc/awslogs/awslogs.conf"]
+                }
+              }
+            }
+          }
+        }
+      },
+
+      "Properties": {
+        "KeyName": {
+          "Ref": "KeyName"
+        },
+        "ImageId": {
+          "Fn::FindInMap": ["AWSRegionArch2AMI", {
+            "Ref": "AWS::Region"
+          }, {
+            "Fn::FindInMap": ["AWSInstanceType2Arch", {
+              "Ref": "InstanceType"
+            }, "Arch"]
+          }]
+        },
+        "BlockDeviceMappings": [{
+          "DeviceName": "/dev/xvda",
+          "Ebs": {
+            "VolumeSize": "50",
+            "VolumeType": "gp2"
+          }
+        }],
+        "SecurityGroups": [{
+          "Ref": "InstanceSecurityGroup"
+        }],
+        "InstanceType": {
+          "Ref": "InstanceType"
+        },
+        "IamInstanceProfile": {
+          "Ref": "JenkinsInstanceProfile"
+        },
+        "UserData": {
+          "Fn::Base64": {
+            "Fn::Join": ["", [
+              "#!/bin/bash -xe\n",
+              "yum update -y aws-cfn-bootstrap\n",
+
+              "/opt/aws/bin/cfn-init -v ",
+              " --stack ", {
+                "Ref": "AWS::StackName"
+              },
+              " --resource LaunchConfig ",
+              " --configsets install_all ",
+              " --region ", {
+                "Ref": "AWS::Region"
+              }, "\n",
+
+              "# Install Jenkins\n",
+              "wget -O /etc/yum.repos.d/jenkins.repo http://pkg.jenkins-ci.org/redhat/jenkins.repo\n",
+              "rpm --import http://pkg.jenkins-ci.org/redhat/jenkins-ci.org.key\n",
+              "yum install -y jenkins\n",
+
+              "# Add Jenkins user to Docker group\n",
+              "usermod -a -G docker jenkins\n",
+              "service jenkins start\n",
+              "chkconfig jenkins on\n",
+
+              "# Update the AWS CLI to the latest version\n",
+              "yum update -y aws-cli\n",
+
+              "# Wait 30 seconds to allow Jenkins to startup\n",
+              "echo \"Waiting 30 seconds for Jenkins to start.....\"\n",
+              "sleep 30\n",
+
+              "# Install the required plugins\n",
+              "cd /var/lib/jenkins/plugins\n",
+              "curl -O -L https://updates.jenkins-ci.org/latest/token-macro.hpi\n",
+              "curl -O -L https://updates.jenkins-ci.org/latest/docker-build-publish.hpi\n",
+              "curl -O -L https://updates.jenkins-ci.org/latest/multiple-scms.hpi\n",
+              "curl -O -L https://updates.jenkins-ci.org/latest/github-api.hpi\n",
+              "curl -O -L https://updates.jenkins-ci.org/latest/scm-api.hpi\n",
+              "curl -O -L https://updates.jenkins-ci.org/latest/git-client.hpi\n",
+              "curl -O -L https://updates.jenkins-ci.org/latest/github.hpi\n",
+              "curl -O -L https://updates.jenkins-ci.org/latest/git.hpi\n",
+              "curl -O -L https://updates.jenkins-ci.org/latest/dockerhub.hpi\n",
+              "chown jenkins:jenkins *.hpi\n",
+
+              "# Restarting Jenkins\n",
+              "service jenkins restart\n",
+
+              "/opt/aws/bin/cfn-signal -e $? ",
+              " --stack ", {
+                "Ref": "AWS::StackName"
+              },
+              " --resource WebServerGroup ",
+              " --region ", {
+                "Ref": "AWS::Region"
+              }, "\n"
+            ]]
+          }
+        }
+      }
+    },
+
+    "InstanceSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Enable SSH access and HTTP from anywhere",
+        "VpcId": {
+          "Ref": "VpcId"
+        },
+        "SecurityGroupIngress": [{
+          "IpProtocol": "tcp",
+          "FromPort": "22",
+          "ToPort": "22",
+          "CidrIp": {
+            "Ref": "SSHLocation"
+          }
+        }, {
+          "IpProtocol": "tcp",
+          "FromPort": "80",
+          "ToPort": "80",
+          "CidrIp": "0.0.0.0/0"
+        }]
+      }
+    }
+  }
+}
