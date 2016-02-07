@@ -40,7 +40,7 @@ application.config.from_object(__name__)
 application.config.from_pyfile('application.config', silent=True)
 
 # Only enable Flask debugging if an env var is set to true
-application.debug = application.config['FLASK_DEBUG'].lower()[0] == 't'
+application.debug = application.config['FLASK_DEBUG'].lower() == 'true'
 
 # Connect to DynamoDB and get ref to Table
 ddb_conn = dynamodb2.connect_to_region(application.config['AWS_REGION'])
