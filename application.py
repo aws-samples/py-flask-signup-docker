@@ -27,8 +27,8 @@ from boto.dynamodb2.exceptions import ConditionalCheckFailedException
 from boto.exception import JSONResponseError
 
 # Default config vals
-THEME = 'default' if os.environ.get('THEME') is None else os.environ.get('THEME')
-FLASK_DEBUG = 'false' if os.environ.get('FLASK_DEBUG') is None else os.environ.get('FLASK_DEBUG')
+THEME = os.environ.get('THEME', 'default')
+FLASK_DEBUG = os.environ.get('FLASK_DEBUG', 'false')
 
 # Create the Flask app
 application = flask.Flask(__name__)
@@ -40,7 +40,7 @@ application.config.from_object(__name__)
 application.config.from_pyfile('application.config', silent=True)
 
 # Only enable Flask debugging if an env var is set to true
-application.debug = application.config['FLASK_DEBUG'] in ['true', 'True']
+application.debug = application.config['FLASK_DEBUG'].lower() == 'true'
 
 # Connect to DynamoDB and get ref to Table
 ddb_conn = dynamodb2.connect_to_region(application.config['AWS_REGION'])
